@@ -17,7 +17,7 @@
     <string name="notification_title">TG WS Proxy</string>
     <string name="notification_text">Прокси работает на порту %d</string>
     <string name="stop">Остановить</string>
-    <string name="traffic_stats">↑ %s ↓ %s</string>
+    <string name="traffic_stats" formatted="true">↑ %s ↓ %s</string>
     <string name="connections">Подключений: %d</string>
     <string name="dc_config">Конфигурация DC</string>
     <string name="dc_2">DC 2</string>

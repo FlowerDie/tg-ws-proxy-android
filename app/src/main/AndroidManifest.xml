@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
