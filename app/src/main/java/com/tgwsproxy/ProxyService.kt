@@ -3,6 +3,7 @@ package com.tgwsproxy
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
@@ -202,9 +203,9 @@ class ProxyService : Service() {
             action = ACTION_STOP
         }
 
-        val stopPendingIntent = android.app.PendingIntent.getService(
+        val stopPendingIntent = PendingIntent.getService(
             this, 0, stopIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)

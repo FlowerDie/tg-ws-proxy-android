@@ -15,21 +15,13 @@ object CryptoUtils {
     private const val AES_IV_LEN = 16
 
     // Reserved bytes to detect non-MTProto connections
-    private val RESERVED_FIRST_BYTES = byteArrayOf(
-        0x16.toByte(), 0x03, 0x01, 0x02, 0x00, 0x01, 0x00, 0x01, 0xfc,
-        0x16, 0x03, 0x01, 0x02, 0x00, 0x01, 0x00, 0x01, 0xfd,
-        0x16, 0x03, 0x01, 0x02, 0x00, 0x01, 0x00, 0x01, 0xfe,
-        0x16, 0x03, 0x01, 0x02, 0x00, 0x01, 0x00, 0x01, 0xff,
-        0x16, 0x03, 0x03, 0x02, 0x00, 0x01, 0x00, 0x01, 0xfc,
-        0x16, 0x03, 0x03, 0x02, 0x00, 0x01, 0x00, 0x01, 0xfd,
-        0x16, 0x03, 0x03, 0x02, 0x00, 0x01, 0x00, 0x01, 0xfe,
-        0x16, 0x03, 0x03, 0x02, 0x00, 0x01, 0x00, 0x01, 0xff,
-        0x80.toByte(), 0x7f.toByte()
+    private val RESERVED_FIRST_BYTES: Set<Byte> = setOf(
+        0x16.toByte(), 0x80.toByte(), 0x7f.toByte()
     )
 
-    private val RESERVED_STARTS = listOf(
+    private val RESERVED_STARTS: List<ByteArray> = listOf(
         byteArrayOf(0x50.toByte(), 0x4f, 0x53, 0x54), // POST
-        byteArrayOf(0x47.toByte(), 0x45, 0x54, 0x20), // GET
+        byteArrayOf(0x47.toByte(), 0x45, 0x54, 0x20), // GET 
         byteArrayOf(0x48.toByte(), 0x45, 0x41, 0x44), // HEAD
         byteArrayOf(0x4f.toByte(), 0x50, 0x54, 0x49), // OPTI
         byteArrayOf(0x43.toByte(), 0x4f, 0x4e, 0x4e), // CONN
@@ -46,9 +38,7 @@ object CryptoUtils {
         if (data.size < HANDSHAKE_LEN) return false
 
         // Check reserved first bytes
-        for (b in RESERVED_FIRST_BYTES) {
-            if (data[0] == b) return false
-        }
+        if (data[0] in RESERVED_FIRST_BYTES) return false
 
         // Check reserved starts
         for (start in RESERVED_STARTS) {
@@ -69,7 +59,7 @@ object CryptoUtils {
 
     /**
      * Парсит handshake пакет MTProto
-     * Возвращает: (dcId, isMedia, protocolTag, randomBytes)
+     * Возвращает: (dcId, isMedia, randomBytes)
      */
     fun parseHandshake(handshake: ByteArray, secretBytes: ByteArray): HandshakeResult? {
         if (handshake.size != HANDSHAKE_LEN) return null
@@ -80,11 +70,11 @@ object CryptoUtils {
             randomBytes[i] = (handshake[i].toInt() xor secretBytes[i].toInt()).toByte()
         }
 
-        // DC ID is in bytes 32-33 (big endian)
+        // DC ID is in bytes 56-57 (big endian, short)
         val dcIdBuf = ByteBuffer.wrap(handshake, 56, 2).order(ByteOrder.BIG_ENDIAN)
         val dcId = dcIdBuf.short.toInt() and 0xFFFF
 
-        // Check if media (bit flag)
+        // Check if media (bit flag in byte 60)
         val isMedia = (handshake[60].toInt() and 0x80) != 0
 
         return HandshakeResult(
@@ -119,12 +109,12 @@ object CryptoUtils {
      * Создаёт AES-CTR дешифратор
      */
     fun createAesCtrDecrypt(key: ByteArray, iv: ByteArray): Cipher {
-        // CTR mode is symmetric, encrypt and decrypt are the same
+        // CTR mode is symmetric
         return createAesCtr(key, iv)
     }
 
     /**
-     * XOR маска для WebSocket фреймов
+     * XOR маска для данных
      */
     fun xorMask(data: ByteArray, mask: ByteArray): ByteArray {
         val result = ByteArray(data.size)
@@ -142,7 +132,6 @@ object CryptoUtils {
         dcEncryptKey: ByteArray,
         dcIv: ByteArray
     ): ByteArray {
-        // Relay init = 64 bytes of encrypted data
         val init = ByteArray(64)
         randomBytes.copyInto(init)
 

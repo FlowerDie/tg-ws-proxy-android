@@ -1,10 +1,6 @@
 package com.tgwsproxy
 
 import android.util.Log
-import java.io.ByteArrayOutputStream
-import java.io.DataInputStream
-import java.io.DataOutputStream
-import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
 import javax.crypto.Cipher
@@ -24,7 +20,6 @@ class MTProtoHandler {
         )
 
         private const val HANDSHAKE_LEN = 64
-        private const val MAX_PACKET_SIZE = 16 * 1024 * 1024 // 16MB
     }
 
     /**
@@ -65,9 +60,7 @@ class MTProtoHandler {
             }
 
             // Parse handshake with secret
-            val secretBytes = config.secret.chunked(2)
-                .map { it.toInt(16).toByte() }
-                .toByteArray()
+            val secretBytes = hexStringToByteArray(config.secret)
 
             val handshakeResult = CryptoUtils.parseHandshake(handshake, secretBytes)
                 ?: run {
@@ -82,8 +75,14 @@ class MTProtoHandler {
             val cltToTgKey = CryptoUtils.generateAesKey(handshakeResult.randomBytes, secretBytes)
             val tgToCltKey = CryptoUtils.generateAesKey(secretBytes, handshakeResult.randomBytes)
 
-            val cltToTgIv = handshakeResult.randomBytes.sliceArray(0..3) + secretBytes.sliceArray(0..11).toByteArray()
-            val tgToCltIv = secretBytes.sliceArray(0..3).toByteArray() + handshakeResult.randomBytes.sliceArray(0..11).toByteArray()
+            val cltToTgIv = concatByteArrays(
+                handshakeResult.randomBytes.copyOfRange(0, 4),
+                secretBytes.copyOfRange(0, 12)
+            )
+            val tgToCltIv = concatByteArrays(
+                secretBytes.copyOfRange(0, 4),
+                handshakeResult.randomBytes.copyOfRange(0, 12)
+            )
 
             val cltEncryptor = CryptoUtils.createAesCtr(cltToTgKey, cltToTgIv)
             val cltDecryptor = CryptoUtils.createAesCtrDecrypt(cltToTgKey, cltToTgIv)
@@ -101,24 +100,40 @@ class MTProtoHandler {
 
             // Try WebSocket connection first
             val wsDomains = WebSocketClient.getWsDomains(targetDcId, handshakeResult.isMedia)
-            var wsConnection: ConnectionPool.WsConnection? = null
-            var useTcpFallback = false
+            var wsClient: WebSocketClient? = null
 
             for (url in wsDomains) {
-                val wsClient = WebSocketClient(onMessage = { /* handled by bridge */ })
-                if (wsClient.connect(url)) {
-                    wsConnection = ConnectionPool.WsConnection(wsClient, targetDcId, handshakeResult.isMedia)
+                val client = WebSocketClient(
+                    onMessage = { /* handled by bridge */ },
+                    onClose = { _, _ -> }
+                )
+                if (client.connect(url)) {
+                    wsClient = client
                     break
                 }
             }
 
-            if (wsConnection == null) {
-                Log.w(TAG, "WebSocket unavailable, falling back to TCP for DC $targetDcId")
-                useTcpFallback = true
-            }
-
-            if (useTcpFallback) {
+            if (wsClient != null) {
+                // WebSocket bridge
+                handleWsBridge(
+                    clientSocket = clientSocket,
+                    input = input,
+                    output = output,
+                    wsClient = wsClient,
+                    cltDecryptor = cltDecryptor,
+                    cltEncryptor = cltEncryptor,
+                    tgDecryptor = tgDecryptor,
+                    tgEncryptor = tgEncryptor,
+                    onTrafficUpdate = { r, w ->
+                        bytesRead += r
+                        bytesWritten += w
+                        onTrafficUpdate(bytesRead, bytesWritten)
+                    }
+                )
+                wsClient.close()
+            } else {
                 // TCP fallback
+                Log.w(TAG, "WebSocket unavailable, falling back to TCP for DC $targetDcId")
                 handleTcpBridge(
                     clientSocket = clientSocket,
                     input = input,
@@ -135,24 +150,6 @@ class MTProtoHandler {
                         onTrafficUpdate(bytesRead, bytesWritten)
                     }
                 )
-            } else {
-                // WebSocket bridge
-                handleWsBridge(
-                    clientSocket = clientSocket,
-                    input = input,
-                    output = output,
-                    wsConnection = wsConnection!!,
-                    cltDecryptor = cltDecryptor,
-                    cltEncryptor = cltEncryptor,
-                    tgDecryptor = tgDecryptor,
-                    tgEncryptor = tgEncryptor,
-                    onTrafficUpdate = { r, w ->
-                        bytesRead += r
-                        bytesWritten += w
-                        onTrafficUpdate(bytesRead, bytesWritten)
-                    }
-                )
-                wsConnection.client.close()
             }
 
         } catch (e: Exception) {
@@ -171,22 +168,13 @@ class MTProtoHandler {
         clientSocket: Socket,
         input: java.io.InputStream,
         output: java.io.OutputStream,
-        wsConnection: ConnectionPool.WsConnection,
+        wsClient: WebSocketClient,
         cltDecryptor: Cipher,
         cltEncryptor: Cipher,
         tgDecryptor: Cipher,
         tgEncryptor: Cipher,
         onTrafficUpdate: (Long, Long) -> Unit
     ) {
-        val wsClient = wsConnection.client
-
-        // Send relay init
-        val relayInit = CryptoUtils.generateRelayInit(
-            ByteArray(32) { 0 }, // Placeholder
-            ByteArray(32) { 0 }, // Placeholder
-            ByteArray(16) { 0 }  // Placeholder
-        )
-
         // TCP -> WebSocket direction
         val tcpToWs = Thread {
             try {
@@ -206,22 +194,8 @@ class MTProtoHandler {
             }
         }
 
-        // WebSocket -> TCP direction
-        val wsToTcp = Thread {
-            try {
-                // We'll receive messages via the WebSocket listener callback
-                // This is handled in the ProxyService
-                Thread.sleep(Long.MAX_VALUE) // Just wait
-            } catch (e: Exception) {
-                Log.d(TAG, "WS->TCP bridge stopped", e)
-            }
-        }
-
         tcpToWs.start()
-        wsToTcp.start()
-
         tcpToWs.join()
-        wsToTcp.interrupt()
     }
 
     private fun handleTcpBridge(
@@ -290,5 +264,17 @@ class MTProtoHandler {
         remoteToTcp.join()
 
         remoteSocket.close()
+    }
+
+    private fun hexStringToByteArray(hex: String): ByteArray {
+        val result = ByteArray(hex.length / 2)
+        for (i in hex.indices step 2) {
+            result[i / 2] = hex.substring(i, i + 2).toInt(16).toByte()
+        }
+        return result
+    }
+
+    private fun concatByteArrays(a: ByteArray, b: ByteArray): ByteArray {
+        return a + b
     }
 }
