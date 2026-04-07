@@ -21,16 +21,16 @@ class ProxyService : Service() {
         private const val CHANNEL_ID = "tg_ws_proxy_channel"
         private const val NOTIFICATION_ID = 1
 
-        // Broadcast actions
         const val ACTION_START = "com.tgwsproxy.ACTION_START"
         const val ACTION_STOP = "com.tgwsproxy.ACTION_STOP"
         const val ACTION_STATUS = "com.tgwsproxy.ACTION_STATUS"
+        const val ACTION_ERROR = "com.tgwsproxy.ACTION_ERROR"
 
-        // Status extras
         const val EXTRA_STATUS = "status"
         const val EXTRA_BYTES_READ = "bytes_read"
         const val EXTRA_BYTES_WRITTEN = "bytes_written"
         const val EXTRA_CONNECTIONS = "connections"
+        const val EXTRA_ERROR = "error_msg"
 
         const val STATUS_STOPPED = 0
         const val STATUS_RUNNING = 1
@@ -124,6 +124,7 @@ class ProxyService : Service() {
                 broadcastStatus(STATUS_RUNNING)
 
                 Thread {
+                    var lastError: String? = null
                     try {
                         handler.handleClientConnection(
                             clientSocket = clientSocket,
@@ -134,10 +135,16 @@ class ProxyService : Service() {
                             },
                             onConnectionUpdate = { delta ->
                                 activeConnections.addAndGet(delta)
+                            },
+                            onError = { msg ->
+                                lastError = msg
+                                Log.e(TAG, "Client error: $msg")
+                                broadcastError(msg)
                             }
                         )
                     } catch (e: Exception) {
                         Log.e(TAG, "Error in client handler", e)
+                        broadcastError(e.message ?: "Unknown error")
                     } finally {
                         try {
                             clientSocket.close()
@@ -223,6 +230,13 @@ class ProxyService : Service() {
             putExtra(EXTRA_BYTES_READ, totalBytesRead)
             putExtra(EXTRA_BYTES_WRITTEN, totalBytesWritten)
             putExtra(EXTRA_CONNECTIONS, activeConnections.get())
+        }
+        sendBroadcast(intent)
+    }
+
+    private fun broadcastError(msg: String) {
+        val intent = Intent(ACTION_ERROR).apply {
+            putExtra(EXTRA_ERROR, msg)
         }
         sendBroadcast(intent)
     }

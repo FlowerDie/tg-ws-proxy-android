@@ -83,8 +83,19 @@
             android:layout_height="56dp"
             android:text="@string/start_proxy"
             android:textSize="16sp"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="8dp"
             app:cornerRadius="12dp" />
+
+        <!-- Error/Log text -->
+        <TextView
+            android:id="@+id/tvError"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="13sp"
+            android:textColor="@color/warning"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone" />
 
         <!-- Settings Card -->
         <com.google.android.material.card.MaterialCardView

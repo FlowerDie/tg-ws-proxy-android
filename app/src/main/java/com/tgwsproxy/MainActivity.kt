@@ -22,13 +22,21 @@ class MainActivity : AppCompatActivity() {
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == ProxyService.ACTION_STATUS) {
-                updateStatus(
-                    status = intent.getIntExtra(ProxyService.EXTRA_STATUS, ProxyService.STATUS_STOPPED),
-                    bytesRead = intent.getLongExtra(ProxyService.EXTRA_BYTES_READ, 0),
-                    bytesWritten = intent.getLongExtra(ProxyService.EXTRA_BYTES_WRITTEN, 0),
-                    connections = intent.getIntExtra(ProxyService.EXTRA_CONNECTIONS, 0)
-                )
+            when (intent?.action) {
+                ProxyService.ACTION_STATUS -> {
+                    updateStatus(
+                        status = intent.getIntExtra(ProxyService.EXTRA_STATUS, ProxyService.STATUS_STOPPED),
+                        bytesRead = intent.getLongExtra(ProxyService.EXTRA_BYTES_READ, 0),
+                        bytesWritten = intent.getLongExtra(ProxyService.EXTRA_BYTES_WRITTEN, 0),
+                        connections = intent.getIntExtra(ProxyService.EXTRA_CONNECTIONS, 0)
+                    )
+                }
+                ProxyService.ACTION_ERROR -> {
+                    val errMsg = intent.getStringExtra(ProxyService.EXTRA_ERROR) ?: "Unknown error"
+                    binding.tvError.text = "⚠ $errMsg"
+                    binding.tvError.visibility = android.view.View.VISIBLE
+                    Toast.makeText(context, "Ошибка: $errMsg", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -154,6 +162,10 @@ class MainActivity : AppCompatActivity() {
         bytesWritten: Long = 0,
         connections: Int = 0
     ) {
+        // Clear error on status change
+        if (status != ProxyService.STATUS_ERROR) {
+            binding.tvError.visibility = android.view.View.GONE
+        }
         val statusText = when (status) {
             ProxyService.STATUS_RUNNING -> getString(R.string.status_running)
             ProxyService.STATUS_ERROR -> getString(R.string.status_error)
